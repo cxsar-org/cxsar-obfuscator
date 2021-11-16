@@ -7,10 +7,11 @@
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
-    <orderEntry type="library" name="asm" level="project" />
-    <orderEntry type="library" name="asm.util" level="project" />
-    <orderEntry type="library" name="asm.tree" level="project" />
-    <orderEntry type="library" name="asm.commons" level="project" />
-    <orderEntry type="library" name="io.github.classgraph" level="project" />
+    <orderEntry type="library" exported="" name="io.github.classgraph" level="project" />
+    <orderEntry type="library" name="asm-8.0" level="project" />
+    <orderEntry type="library" name="asm-analysis-8.0" level="project" />
+    <orderEntry type="library" name="asm-commons-8.0" level="project" />
+    <orderEntry type="library" name="asm-tree-8.0" level="project" />
+    <orderEntry type="library" name="asm-util-8.0" level="project" />
   </component>
 </module>

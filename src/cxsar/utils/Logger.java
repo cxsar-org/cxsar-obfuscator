@@ -3,7 +3,6 @@ package cxsar.utils;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.IOException;
 
 public class Logger {
 
@@ -73,12 +72,26 @@ public class Logger {
         }
     }
 
+    public void log(String format, Object... args) {
+        log(String.format(format, args));
+    }
+
+    public void log(LogLevel level, String format, Object... args) {
+        log(String.format(format, args), level);
+    }
+
     public void log(String message) {
         this.log(message, LogLevel.NORMAL);
     }
 
     public void handleException(Exception e) {
-        log(e.toString(), LogLevel.EXCEPTION);
+        try {
+            log(e.toString(), LogLevel.EXCEPTION);
+
+            throw e;
+        } catch (Exception _) {
+            System.exit(_.hashCode());
+        }
     }
 
 }
