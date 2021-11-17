@@ -2,172 +2,113 @@ package cxsar;
 
 import cxsar.transformers.ITransformer;
 import cxsar.transformers.RegisterTransformer;
-import cxsar.transformers.utils.EntryWrapper;
-import cxsar.utils.LogLevel;
+import cxsar.transformers.TransformerPriority;
+import cxsar.transformers.impl.name.Dictionary;
 import cxsar.utils.Logger;
+import cxsar.utils.Timer;
 import io.github.classgraph.AnnotationInfo;
 import io.github.classgraph.ClassGraph;
 import io.github.classgraph.ScanResult;
 import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.tree.ClassNode;
 
-import java.io.*;
-import java.nio.Buffer;
-import java.util.*;
-import java.util.zip.*;
+import java.io.File;
+import java.io.IOException;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.CRC32;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
 
 public class Cxsar {
 
     // Target jar
     File targetFile;
 
-    // Library files
-    private ArrayList<File> libraries;
-
-    // All parsed class files
-    public HashMap<String, ClassNode> parsedClasses;
-
-    // All other files, considered as 'resources'
-    public HashMap<String, byte[]> parsedResources;
-
-    // Entire classpath
-    public HashMap<String, EntryWrapper> classPath;
-
     // All 'active' transformers
-    public HashMap<String, ITransformer> transformerList;
+    public LinkedList<ITransformer> transformerList;
+
+    // The entire loaded classpath
+    public HashMap<String, ClassNode> classPath;
+
+    // All resources
+    public HashMap<String, byte[]> resources;
 
     //  Initiate Cxsar with the target JAR file
     public Cxsar(File targetFile) {
         this.targetFile = targetFile;
 
         // Initiate all the fields we need
-        parsedClasses = new HashMap<>();
-        parsedResources = new HashMap<>();
-        transformerList = new HashMap<>();
+        transformerList = new LinkedList<>();
         classPath = new HashMap<>();
-        libraries = new ArrayList<>();
+        resources = new HashMap<>();
     }
 
     // Obfuscate the target jar file
     public void obfuscateTarget() throws Exception {
-        ZipFile inputStream = new ZipFile(targetFile);
-        ZipOutputStream outputStream;
+        // Add transformers
+        this.populateTransformerList();
 
-        // Set the output stream
-        outputStream = new ZipOutputStream(new FileOutputStream("out.jar"));
-        outputStream.setMethod(ZipOutputStream.DEFLATED);
+        // Create performance timer
+        Timer timer = new Timer();
 
-        HashMap<String, byte[]> dataMap = new HashMap<>();
+        Logger.getInstance().log("Loading JAR file...");
 
-        Enumeration<? extends ZipEntry> entries = inputStream.entries();
-        while(entries.hasMoreElements()) {
-            ZipEntry entry = entries.nextElement();
+        // Open the zipfile
+        ZipFile zipFile = new ZipFile(this.targetFile);
 
-            if(entry == null)
-                break;
-
-            if(entry.isDirectory()) {
-                outputStream.putNextEntry(entry);
-                continue;
-            }
-
-
-            String entryName = entry.getName();
-
-            byte[] bytes = new byte[(int) entry.getSize()];
-            inputStream.getInputStream(entry).read(bytes);
+        Enumeration<? extends ZipEntry> entries = zipFile.entries();
+        while (entries.hasMoreElements())
+        {
+            ZipEntry zipEntry = entries.nextElement();
 
             try {
-                if (entryName.endsWith(".class") && !entryName.startsWith("META-INF")) {
-                    Logger.getInstance().log("Loading entry: %s", entryName);
+                if (zipEntry.getName().endsWith(".class")) {
+                    // Create classreader and a new node
+                    ClassReader reader = new ClassReader(zipFile.getInputStream(zipEntry));
+                    ClassNode node = new ClassNode();
 
-                    ClassReader classReader = new ClassReader(inputStream.getInputStream(entry));
-                    ClassNode classNode = new ClassNode();
+                    // Visit the source file
+                    reader.accept(node, 0);
 
+                    // Log
+                    Logger.getInstance().log("Added entry: %s", zipEntry.getName());
 
-                    classReader.accept(classNode, 0);
-                    parsedClasses.put(entryName, classNode);
-                    dataMap.put(entryName, bytes);
-
+                    // Add it
+                    classPath.put(zipEntry.getName(), node);
                 } else {
-                    //TODO: MANIFEST PARSER
-                    parsedResources.put(entryName, bytes);
+                    // Create a buffer
+                    byte[] fileBuffer = new byte[(int) zipEntry.getSize()];
+
+                    // Read to the buffer
+                    zipFile.getInputStream(zipEntry).read(fileBuffer, 0, fileBuffer.length);
+
+                    resources.put(zipEntry.getName(), fileBuffer);
                 }
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
 
-        Logger.getInstance().log("Successfully %d classes", parsedClasses.size());
+        // Debug info
+        Logger.getInstance().log("Loaded %d classes", classPath.size());
 
-        // Populate the ClassNodes
-        parsedClasses.forEach((key, value) -> classPath.put(key.replace(".class", ""), new EntryWrapper(value)));
+        // Done
+        Logger.getInstance().log("Successfully loaded zip file in %dms", timer.end());
 
-        // Load all transformers
-        populateTransformerList();
+        timer.begin();
+        Logger.getInstance().log("Doing pre-transformation");
 
-        // Do name transformation first
-        transformerList.forEach((name, transformer) -> transformer.preTransform(this, parsedClasses));
+        Dictionary.getInstance().generateDictionary(this);
 
-        List<Thread> threads = new ArrayList<>();
-        final LinkedList<Map.Entry<String, ClassNode>> classQueue = new LinkedList<>(parsedClasses.entrySet());
+        // Classpath is now loaded properly, do preTransforms
+        this.transformerList.forEach(iTransformer -> iTransformer.preTransform(this));
 
-        HashMap<String, byte[]> toWrite = new HashMap<>();
-
-        for(int i = 0; i < 5; ++i) {
-            threads.add(new Thread(() -> {
-                while(true)
-                {
-                    Map.Entry<String, ClassNode> stringClassNodeEntry;
-
-                    synchronized (classQueue) {
-                        stringClassNodeEntry = classQueue.poll();
-                    }
-
-                    if (stringClassNodeEntry == null) break;
-                    String entryName = stringClassNodeEntry.getKey();
-
-                    byte[] entryData;
-                    ClassNode cn = stringClassNodeEntry.getValue();
-
-                    ClassWriter writer = new ClassWriter(0);
-                    cn.accept(writer);
-
-                    entryData = writer.toByteArray();
-
-                    synchronized (toWrite)
-                    {
-                        toWrite.put(entryName, entryData);
-                    }
-                }
-            }));
-        }
-
-        threads.forEach(Thread::start);
-
-        threads.forEach(thread -> {
-            try {
-                thread.join();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        });
-
-        for (Map.Entry<String, byte[]> stringEntry : toWrite.entrySet()) {
-            writeEntry(outputStream, stringEntry.getKey(), stringEntry.getValue(), false);
-        }
-
-        // TODO: Fix manifest automatically
-        parsedResources.forEach((s, bytes) -> {
-            try {
-                writeEntry(outputStream, s, bytes, false);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        });
-
-        outputStream.close();
+        Logger.getInstance().log("Succesfully did pre-transformation in %dms", timer.end());
     }
 
     public void writeEntry(ZipOutputStream outJar, String name, byte[] value, boolean stored) throws IOException {
@@ -197,6 +138,10 @@ public class Cxsar {
     // Find all transformers
     public void populateTransformerList() {
         String pkg = "cxsar.transformers";
+
+        // Amount forced to the front
+        final int[] forceCount = {0};
+
         try (ScanResult scanResult = new ClassGraph()
                 .enableAllInfo()
                 .whitelistPackages(pkg)
@@ -212,11 +157,10 @@ public class Cxsar {
                 if (!transformerEnabled)
                     return;
 
-                String transformerName = annotationInfo.getParameterValues().getValue("name").toString();
                 Class<ITransformer> transformerClass = (Class<ITransformer>) classInfo.loadClass(false);
 
                 try {
-                    transformerList.put(transformerName, transformerClass.newInstance());
+                    transformerList.add(forceCount[0], transformerClass.newInstance());
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -226,5 +170,16 @@ public class Cxsar {
         }
 
         Logger.getInstance().log("Succesfully parsed %d Transformers", transformerList.size());
+    }
+
+    public Map.Entry<String, byte[]> findManifestEntry() {
+        AtomicReference<Map.Entry<String, byte[]>> res = null;
+
+        this.resources.entrySet().forEach(stringEntry -> {
+            if(stringEntry.getKey().endsWith("MANIFEST.MF"))
+                res.set(stringEntry);
+        });
+
+        return res.get();
     }
 }
