@@ -10,14 +10,13 @@ import io.github.classgraph.AnnotationInfo;
 import io.github.classgraph.ClassGraph;
 import io.github.classgraph.ScanResult;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.tree.ClassNode;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
@@ -103,12 +102,77 @@ public class Cxsar {
         timer.begin();
         Logger.getInstance().log("Doing pre-transformation");
 
-        Dictionary.getInstance().generateDictionary(this);
-
         // Classpath is now loaded properly, do preTransforms
         this.transformerList.forEach(iTransformer -> iTransformer.preTransform(this));
 
         Logger.getInstance().log("Succesfully did pre-transformation in %dms", timer.end());
+
+        // Write to new file
+        ZipOutputStream zipOutputStream = new ZipOutputStream(new FileOutputStream("out.jar"));
+
+        // Lists...
+        List<Thread> threads = new ArrayList<>();
+        final LinkedList<Map.Entry<String, ClassNode>> classQueue = new LinkedList<>(classPath.entrySet());
+
+        HashMap<String, byte[]> toWrite = new HashMap<>();
+
+        for(int i = 0; i < 5; ++i)
+        {
+            threads.add(new Thread(() -> {
+                while(true)
+                {
+                    Map.Entry<String, ClassNode> stringClassNodeEntry;
+
+                    synchronized (classQueue) {
+                        stringClassNodeEntry = classQueue.poll();
+                    }
+
+                    // Check if its null
+                    if(stringClassNodeEntry == null)
+                        break;
+
+                    ClassNode classNode = stringClassNodeEntry.getValue();
+
+                    // Create the writer
+                    ClassWriter writer = new ClassWriter(0);
+                    classNode.accept(writer);
+
+                    // Convert to the data
+                    byte[] newEntryData;
+                    newEntryData = writer.toByteArray();
+
+                    synchronized (toWrite)
+                    {
+                        toWrite.put(stringClassNodeEntry.getKey(), newEntryData);
+                    }
+                }
+            }));
+        }
+
+        threads.forEach(Thread::start);
+        for (Thread thread : threads) {
+            thread.join();
+        }
+
+        // Write back the classes
+        toWrite.entrySet().forEach(stringEntry -> {
+            try {
+                writeEntry(zipOutputStream, stringEntry.getKey(), stringEntry.getValue(), false);
+            } catch (IOException e) {
+                Logger.getInstance().handleException(e);
+            }
+        });
+
+        // Write back all old resources
+        resources.forEach((s, bytes) -> {
+            try {
+                writeEntry(zipOutputStream, s, bytes, false);
+            } catch (IOException e) {
+                Logger.getInstance().handleException(e);
+            }
+        });
+
+        zipOutputStream.close();
     }
 
     public void writeEntry(ZipOutputStream outJar, String name, byte[] value, boolean stored) throws IOException {

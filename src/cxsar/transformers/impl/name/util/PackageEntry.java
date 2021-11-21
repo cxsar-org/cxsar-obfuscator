@@ -18,12 +18,19 @@ public class PackageEntry {
     // Get classEntry
     ArrayList<ClassEntry> classEntries;
 
+    // All used generated names
+    ArrayList<String> generatedNames;
+
+    // Amount of generated names
+    int generatedNameCount;
+
     // Getters & setters
     public PackageEntry(String name) {
         this.name = name;
         this.originalPackageName = name;
+        generatedNameCount = 0;
 
-
+        generatedNames = new ArrayList<>();
         classEntries = new ArrayList<>();
         subEntries = new ArrayList<>();
     }
@@ -40,6 +47,36 @@ public class PackageEntry {
         } while (entry != null);
 
         return stringBuilder.substring(1);
+    }
+
+    public String getOriginalFullPath() {
+        StringBuilder stringBuilder = new StringBuilder();
+
+        PackageEntry entry = this;
+
+        do {
+            stringBuilder.insert(0, entry.originalPackageName + "/");
+
+            entry = entry.parentEntry;
+        } while (entry != null);
+
+        return stringBuilder.substring(1);
+    }
+
+    public boolean transformedNameAlreadyInUse(String name) {
+        for(ClassEntry entry : classEntries)
+        {
+            if(entry.name.equals(name))
+                return true;
+
+            for(ClassEntry subs : entry.getSubClasses())
+            {
+                if(subs.getName().equals(name))
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     public PackageEntry findSubEntry(String name) {
@@ -92,6 +129,10 @@ public class PackageEntry {
 
     public void setSubEntries(ArrayList<PackageEntry> subEntries) {
         this.subEntries = subEntries;
+    }
+
+    public int getGeneratedNameCount() {
+        return generatedNameCount;
     }
 
     public boolean visit(Visitor visitor) {

@@ -3,12 +3,13 @@ package cxsar.transformers.impl.name;
 import cxsar.Cxsar;
 import cxsar.transformers.impl.name.util.ClassEntry;
 import cxsar.transformers.impl.name.util.PackageEntry;
-import cxsar.transformers.impl.name.util.Visitor;
 import cxsar.utils.Logger;
 import cxsar.utils.Timer;
 
+import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.List;
+import java.util.Random;
 
 
 // Generate dictionary for the classpath
@@ -17,12 +18,18 @@ public class Dictionary {
     // Singleton stuff
     private static Dictionary instance = new Dictionary();
 
+    // List of classNames to use
+    private List<String> classNames = new ArrayList<>();
+
     // Keep track of packages and their used names, since they can't be identical
     private PackageEntry packageTree;
 
     public static Dictionary getInstance() {
         return instance;
     }
+
+    // Alphabet string (lol!)
+    public static final String ALPHABET = "abcdefghijklmnopqrstuvwxyz";
 
     // Generate a dictionary for the classpath in context
     public void generateDictionary(Cxsar cxsar) {
@@ -39,20 +46,84 @@ public class Dictionary {
             getPackageTreeEntry(path);
         });
 
-        AtomicInteger integer = new AtomicInteger(0);
-        packageTree.visit(entry -> {
-                    integer.addAndGet(entry.getClassEntries().size());
-                    return false;
-                });
-
-        Logger.getInstance().log("%d entries\n", integer.get());
-
         // Fix innerClasses
         Timer timer = new Timer();
 
         fixInnerClasses();
 
         Logger.getInstance().log("Fixed inner classes in %dms", timer.end());
+
+        packageTree.visit(packageEntry -> {
+           for(ClassEntry entry : packageEntry.getClassEntries())
+           {
+               Logger.getInstance().log("Full class: %s", entry.getFullPath());
+               for(ClassEntry subEntry : entry.getSubClasses())
+                   Logger.getInstance().log("Full sub-class path: %s", subEntry.getFullPath());
+           }
+
+           return false;
+        });
+
+        // list of threads
+        List<Thread> threadList = new ArrayList<>();
+
+        // random
+        Random random = new Random();
+
+        for(int i = 0; i < 5; ++i)
+            threadList.add(new Thread(() -> {
+                while(true) {
+                    synchronized (classNames) {
+                        if(classNames.size() >= 1000)
+                            break;
+
+                        StringBuilder builder = new StringBuilder();
+                        for(int j = 0; j < 10; j++)
+                            builder.append(ALPHABET.charAt(random.nextInt(ALPHABET.length())));
+
+                        classNames.add(builder.toString());
+                    }
+                }
+            }));
+
+        threadList.forEach(Thread::start);
+
+        try {
+            for (Thread thread : threadList) {
+                thread.join();
+            }
+        } catch (Exception e) {
+            Logger.getInstance().handleException(e);
+        }
+    }
+
+    // Find any classentry
+    public ClassEntry findAnyClassEntry(String path)
+    {
+        final ClassEntry[] res = new ClassEntry[1];
+        packageTree.visit(entry -> {
+            for(ClassEntry classEntry : entry.getClassEntries())
+            {
+                if(classEntry.getOriginalFullPath().equals(path))
+                {
+                    res[0] = classEntry;
+                    return true;
+                }
+
+                for(ClassEntry sub : classEntry.getSubClasses())
+                {
+                    if(sub.getOriginalFullPath().equals(path))
+                    {
+                        res[0] = classEntry;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        });
+
+        return res[0];
     }
 
     // Fix inner classes
@@ -73,10 +144,22 @@ public class Dictionary {
                     // Find the parent class and add the current entry to the sub classes
                     ClassEntry parentEntry = packageEntry.findClassEntry(parentName + ".class");
 
+                    // Set the parent class :D
+                    entry.setParentClass(parentEntry);
+
+                    // Set the package as well
+                    entry.setParent(packageEntry);
+
+                    // Fix the name
+                    entry.setName(entry.getName().substring(entry.getName().lastIndexOf('$') + 1));
+
+                    // And original name as well!
+                    entry.setOriginalName(entry.getName().substring(entry.getName().lastIndexOf('$') + 1));
+
                     if(parentEntry != null)
                         parentEntry.getSubClasses().add(entry);
 
-                    Logger.getInstance().log("Added %s as subclas to %s", entry.getName(), parentName);
+                    Logger.getInstance().log("Added %s as subclass to %s", entry.getName(), parentName);
 
                     // Remove original sub class from the list
                     classEntryIterator.remove();
@@ -104,7 +187,9 @@ public class Dictionary {
 
             if(entries[i].endsWith(".class"))
             {
-                currentEntry.getClassEntries().add(new ClassEntry(entries[i]));
+                ClassEntry newEntry = new ClassEntry(entries[i]);
+                newEntry.setParent(currentEntry);
+                currentEntry.getClassEntries().add(newEntry);
                 break;
             }
 
@@ -164,5 +249,21 @@ public class Dictionary {
         // So this would return something like
         // cxsar/main
         return fullPath.substring(0, fullPath.lastIndexOf('/'));
+    }
+
+    public String getGeneratedName(int idx) {
+        if(idx > this.classNames.size() - 1)
+        {
+            Logger.getInstance().log("Idx: %d", idx);
+            Logger.getInstance().handleException(new RuntimeException("Tried using more names than generated..."));
+            return null;
+        }
+
+        return this.classNames.get(idx);
+    }
+
+    // Get the generated tree
+    public PackageEntry getPackageTree() {
+        return this.packageTree;
     }
 }

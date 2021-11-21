@@ -1,5 +1,6 @@
 package cxsar.transformers.impl.name.util;
 
+import cxsar.utils.Logger;
 import sun.reflect.generics.visitor.Visitor;
 
 import java.util.ArrayList;
@@ -61,5 +62,59 @@ public class ClassEntry {
 
     public void setSubClasses(ArrayList<ClassEntry> subClasses) {
         this.subClasses = subClasses;
+    }
+
+    public void setNameTransformed(String newName)
+    {
+        newName += ".class";
+        if(this.parent.transformedNameAlreadyInUse(newName))
+        {
+            Logger.getInstance().log("Name %s already in use for package %s (skipping)", newName, this.parent.getFullPath());
+            return;
+        }
+
+        // Debugging
+        Logger.getInstance().log("Renaming %s to %s", this.originalName, newName);
+
+        this.setName(newName);
+        this.parent.generatedNames.add(newName);
+        this.parent.generatedNameCount++;
+    }
+
+    public String getOriginalFullPath() {
+        StringBuilder nameBuilder = new StringBuilder();
+
+        ClassEntry parent = this;
+        do {
+            if(parent != this)
+                nameBuilder.insert(0, parent.originalName.substring(0, parent.originalName.length() - ".class".length()) + "$");
+            else
+                nameBuilder.insert(0, parent.originalName + "$");
+            parent = parent.parentClass;
+        } while(parent != null);
+
+        nameBuilder.insert(0, this.parent.getOriginalFullPath());
+        return nameBuilder.substring(1, nameBuilder.toString().length() - 1);
+    }
+
+    public String getFullPath() {
+        StringBuilder nameBuilder = new StringBuilder();
+
+        ClassEntry parent = this;
+
+        do {
+            if(parent != this)
+                nameBuilder.insert(0, parent.getName().substring(0, parent.getName().length() - ".class".length()) + "$");
+            else
+                nameBuilder.insert(0, parent.getName() + "$");
+            parent = parent.parentClass;
+        } while(parent != null);
+
+        nameBuilder.insert(0, this.parent.getFullPath());
+        return nameBuilder.substring(1, nameBuilder.toString().length() - 1);
+    }
+
+    public void setOriginalName(String originalName) {
+        this.originalName = originalName;
     }
 }
