@@ -1,5 +1,6 @@
 package cxsar.transformers.impl.name.util;
 
+import cxsar.transformers.impl.name.Dictionary;
 import cxsar.utils.Logger;
 import sun.reflect.generics.visitor.Visitor;
 
@@ -21,6 +22,12 @@ public class ClassEntry {
 
     // Potential sub classes
     ArrayList<ClassEntry> subClasses;
+
+    // All used generated method names
+    int generatedMethodNamesCount = 0;
+
+    // All used generated field names
+    int generatedFieldNamesCount = 0;
 
     public ClassEntry(String name) {
         this.name = name;
@@ -73,9 +80,6 @@ public class ClassEntry {
             return;
         }
 
-        // Debugging
-        Logger.getInstance().log("Renaming %s to %s", this.originalName, newName);
-
         this.setName(newName);
         this.parent.generatedNames.add(newName);
         this.parent.generatedNameCount++;
@@ -112,6 +116,14 @@ public class ClassEntry {
 
         nameBuilder.insert(0, this.parent.getFullPath());
         return nameBuilder.substring(1, nameBuilder.toString().length() - 1);
+    }
+
+    public String nextFieldName() {
+        return Dictionary.getInstance().getGeneratedName(this.generatedFieldNamesCount++);
+    }
+
+    public String nextMethodName() {
+        return Dictionary.getInstance().getGeneratedName(this.generatedMethodNamesCount++);
     }
 
     public void setOriginalName(String originalName) {

@@ -26,6 +26,9 @@ public class NameTransformer implements ITransformer {
         // Generate dictionary for the current context (and hierarchy)
         Dictionary.getInstance().generateDictionary(cxsar);
 
+        // Debugging
+        Dictionary.getInstance().excludePackageEntryAndSubsequentSubEntries(Dictionary.getInstance().getPackageTreeEntry("/org/fife"));
+
         // New mappings
         HashMap<String, String> generatedMappings = new HashMap<>();
 
@@ -38,16 +41,19 @@ public class NameTransformer implements ITransformer {
         // Iterate the entire package tree & generate names
         Dictionary.getInstance().getPackageTree().visit(entry -> {
 
+            if(Dictionary.getInstance().isExcluded(entry))
+                return false;
+
             // Main classes
             for(ClassEntry classEntry : entry.getClassEntries()) {
                 classEntry.setNameTransformed(Dictionary.getInstance().getGeneratedName(entry.getGeneratedNameCount()));
 
-                generatedMappings.put(classEntry.getOriginalFullPath(), classEntry.getFullPath());
+                generatedMappings.put(classEntry.getOriginalFullPath().replace(".class", ""), classEntry.getFullPath().replace(".class", ""));
 
                 for(ClassEntry subEntries : classEntry.getSubClasses()) {
                     subEntries.setNameTransformed(Dictionary.getInstance().getGeneratedName(entry.getGeneratedNameCount()));
 
-                    generatedMappings.put(subEntries.getOriginalFullPath(), subEntries.getFullPath());
+                    generatedMappings.put(subEntries.getOriginalFullPath().replace(".class", ""), subEntries.getFullPath().replace(".class", ""));
                 }
             }
 
@@ -60,26 +66,27 @@ public class NameTransformer implements ITransformer {
         Logger.getInstance().log("Generated mappings in %dms", timer.end());
 
         Remapper remapper = new SimpleRemapper(generatedMappings);
-
         HashMap<String, ClassNode> copyClassPath = (HashMap<String, ClassNode>) cxsar.classPath.clone();
 
-        for(ClassNodeWrapper wrapper : wrapperArrayList)
-        {
-            ClassNode node = wrapper.node;
+        timer.begin();
 
+        copyClassPath.forEach((s, classNode) -> {
             ClassNode copy = new ClassNode();
-            node.accept(new ClassRemapper(copy, remapper));
-
-            wrapper.node = copy;
-
-            cxsar.classPath.remove(wrapper.entry.getOriginalFullPath());
-            cxsar.classPath.put(wrapper.entry.getFullPath(), wrapper.node);
-
-            Logger.getInstance().log("Transformed %s to %s", wrapper.entry.getOriginalFullPath(), wrapper.node.name);
+            classNode.accept(new ClassRemapper(copy, remapper));
 
             ClassWriter writer = new ClassWriter(0);
-            wrapper.node.accept(writer);
-        }
+            copy.accept(writer);
+
+            // Append .class
+            String className = copy.name;
+            className += ".class";
+
+            cxsar.classPath.remove(s);
+            cxsar.classPath.put(className, copy);
+        });
+
+        Logger.getInstance().log("Name transformation done in %dms", timer.end());
+        Dictionary.getInstance().setUsedMappings(generatedMappings); // copy mappings to the dictionary
     }
 
     @Override

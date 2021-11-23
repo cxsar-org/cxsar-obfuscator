@@ -135,6 +135,10 @@ public class PackageEntry {
         return generatedNameCount;
     }
 
+    public void setGeneratedNameCount(int val) {
+        this.generatedNameCount = val;
+    }
+
     public boolean visit(Visitor visitor) {
         if(visitor.accept(this))
             return true;

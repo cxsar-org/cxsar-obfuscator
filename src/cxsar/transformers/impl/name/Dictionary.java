@@ -6,10 +6,7 @@ import cxsar.transformers.impl.name.util.PackageEntry;
 import cxsar.utils.Logger;
 import cxsar.utils.Timer;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 
 
 // Generate dictionary for the classpath
@@ -21,8 +18,17 @@ public class Dictionary {
     // List of classNames to use
     private List<String> classNames = new ArrayList<>();
 
+    // HashMap of used mappings
+    private HashMap<String, String> usedMappings = new HashMap<>();
+
     // Keep track of packages and their used names, since they can't be identical
     private PackageEntry packageTree;
+
+    // Exclusions
+    private ArrayList<PackageEntry> exclusionArrayList = new ArrayList<>();
+
+    // Generated
+    public boolean generated = false;
 
     public static Dictionary getInstance() {
         return instance;
@@ -33,6 +39,9 @@ public class Dictionary {
 
     // Generate a dictionary for the classpath in context
     public void generateDictionary(Cxsar cxsar) {
+
+        if(generated)
+            return;
 
         // Add the base to the package tree
         packageTree = new PackageEntry("/");
@@ -52,17 +61,6 @@ public class Dictionary {
         fixInnerClasses();
 
         Logger.getInstance().log("Fixed inner classes in %dms", timer.end());
-
-        packageTree.visit(packageEntry -> {
-           for(ClassEntry entry : packageEntry.getClassEntries())
-           {
-               Logger.getInstance().log("Full class: %s", entry.getFullPath());
-               for(ClassEntry subEntry : entry.getSubClasses())
-                   Logger.getInstance().log("Full sub-class path: %s", subEntry.getFullPath());
-           }
-
-           return false;
-        });
 
         // list of threads
         List<Thread> threadList = new ArrayList<>();
@@ -95,6 +93,8 @@ public class Dictionary {
         } catch (Exception e) {
             Logger.getInstance().handleException(e);
         }
+
+        generated = true;
     }
 
     // Find any classentry
@@ -158,8 +158,6 @@ public class Dictionary {
 
                     if(parentEntry != null)
                         parentEntry.getSubClasses().add(entry);
-
-                    Logger.getInstance().log("Added %s as subclass to %s", entry.getName(), parentName);
 
                     // Remove original sub class from the list
                     classEntryIterator.remove();
@@ -251,6 +249,20 @@ public class Dictionary {
         return fullPath.substring(0, fullPath.lastIndexOf('/'));
     }
 
+    public void excludePackageEntryAndSubsequentSubEntries(PackageEntry entry)
+    {
+        entry.visit(entry1 -> {
+            this.exclusionArrayList.add(entry1);
+            Logger.getInstance().log("Excluded %s", entry1.getFullPath());
+            return false;
+        });
+    }
+
+    public boolean isExcluded(PackageEntry entry)
+    {
+        return this.exclusionArrayList.contains(entry);
+    }
+
     public String getGeneratedName(int idx) {
         if(idx > this.classNames.size() - 1)
         {
@@ -260,6 +272,14 @@ public class Dictionary {
         }
 
         return this.classNames.get(idx);
+    }
+
+    public HashMap<String, String> getUsedMappings() {
+        return usedMappings;
+    }
+
+    public void setUsedMappings(HashMap<String, String> usedMappings) {
+        this.usedMappings = usedMappings;
     }
 
     // Get the generated tree
