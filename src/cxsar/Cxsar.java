@@ -2,13 +2,16 @@ package cxsar;
 
 import cxsar.transformers.ITransformer;
 import cxsar.transformers.RegisterTransformer;
+import cxsar.transformers.TransformerHolder;
 import cxsar.transformers.TransformerPriority;
 import cxsar.transformers.impl.name.Dictionary;
 import cxsar.utils.Logger;
 import cxsar.utils.Timer;
+import io.github.classgraph.AnnotationEnumValue;
 import io.github.classgraph.AnnotationInfo;
 import io.github.classgraph.ClassGraph;
 import io.github.classgraph.ScanResult;
+import javafx.scene.shape.HLineTo;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.tree.ClassNode;
@@ -16,8 +19,10 @@ import org.objectweb.asm.tree.ClassNode;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -29,7 +34,7 @@ public class Cxsar {
     File targetFile;
 
     // All 'active' transformers
-    public LinkedList<ITransformer> transformerList;
+    public ArrayList<TransformerHolder> transformerList;
 
     // The entire loaded classpath
     public HashMap<String, ClassNode> classPath;
@@ -42,7 +47,7 @@ public class Cxsar {
         this.targetFile = targetFile;
 
         // Initiate all the fields we need
-        transformerList = new LinkedList<>();
+        transformerList = new ArrayList<>();
         classPath = new HashMap<>();
         resources = new HashMap<>();
     }
@@ -103,7 +108,7 @@ public class Cxsar {
         Logger.getInstance().log("Doing pre-transformation");
 
         // Classpath is now loaded properly, do preTransforms
-        this.transformerList.forEach(iTransformer -> iTransformer.preTransform(this));
+        this.transformerList.forEach(iTransformer -> iTransformer.getTransformer().preTransform(this));
 
         Logger.getInstance().log("Succesfully did pre-transformation in %dms", timer.end());
 
@@ -115,6 +120,9 @@ public class Cxsar {
         final LinkedList<Map.Entry<String, ClassNode>> classQueue = new LinkedList<>(classPath.entrySet());
 
         HashMap<String, byte[]> toWrite = new HashMap<>();
+
+        // Fix the manifest
+        fixManifest();
 
         for(int i = 0; i < 5; ++i)
         {
@@ -155,9 +163,9 @@ public class Cxsar {
         }
 
         // Write back the classes
-        toWrite.entrySet().forEach(stringEntry -> {
+        toWrite.forEach((key, value) -> {
             try {
-                writeEntry(zipOutputStream, stringEntry.getKey(), stringEntry.getValue(), false);
+                writeEntry(zipOutputStream, key, value, false);
             } catch (IOException e) {
                 Logger.getInstance().handleException(e);
             }
@@ -224,7 +232,11 @@ public class Cxsar {
                 Class<ITransformer> transformerClass = (Class<ITransformer>) classInfo.loadClass(false);
 
                 try {
-                    transformerList.add(forceCount[0], transformerClass.newInstance());
+                    AnnotationEnumValue enumValue = (AnnotationEnumValue) annotationInfo.getParameterValues().getValue("priority");
+                    TransformerPriority priority = (TransformerPriority)enumValue.loadClassAndReturnEnumValue();
+
+                    TransformerHolder holder = new TransformerHolder(transformerClass.newInstance(), priority, (String)annotationInfo.getParameterValues().getValue("name"));
+                    this.transformerList.add(holder);
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -234,16 +246,37 @@ public class Cxsar {
         }
 
         Logger.getInstance().log("Succesfully parsed %d Transformers", transformerList.size());
+
+        ArrayList<TransformerHolder>  holders = getTransformerListOrdered();
+    }
+
+    public ArrayList<TransformerHolder> getTransformerListOrdered() {
+        return (ArrayList<TransformerHolder>) this.transformerList.stream().sorted(Comparator.comparingInt(value -> value.getTransformerPriority().getValue())).collect(Collectors.toList());
+    }
+
+    public void fixManifest() {
+        byte[] manifest = findManifestEntry().getValue();
+
+        String str = new String(manifest, StandardCharsets.UTF_8);
+
+        String[] split = str.split("\r\n");
+
+        StringBuilder builder = new StringBuilder();
+        Arrays.stream(split).forEach(s -> {
+            if(s.startsWith("Main-Class:"))
+            {
+                String substr = s.substring(0, "Main-Class:".length() + 1);
+                String originalMainClassName = s.substring("Main-Class:".length() + 1);
+                originalMainClassName = originalMainClassName.replace('.', '/');
+                String newName = Dictionary.getInstance().getUsedMappings().get(originalMainClassName);
+                builder.append(substr).append(newName.replace('/', '.')).append("\r\n");
+            } else builder.append(s).append("\r\n");
+        });
+
+        findManifestEntry().setValue(builder.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     public Map.Entry<String, byte[]> findManifestEntry() {
-        AtomicReference<Map.Entry<String, byte[]>> res = null;
-
-        this.resources.entrySet().forEach(stringEntry -> {
-            if(stringEntry.getKey().endsWith("MANIFEST.MF"))
-                res.set(stringEntry);
-        });
-
-        return res.get();
+        return this.resources.entrySet().stream().filter(stringEntry -> stringEntry.getKey().contains("MANIFEST.MF")).findFirst().get();
     }
 }
