@@ -7,6 +7,7 @@ import cxsar.transformers.TransformerPriority;
 import cxsar.transformers.impl.name.Dictionary;
 import cxsar.transformers.impl.name.util.ClassEntry;
 import cxsar.transformers.impl.name.util.ClassNodeWrapper;
+import cxsar.transformers.impl.name.util.CustomNameRemapper;
 import cxsar.utils.Logger;
 import cxsar.utils.Timer;
 import org.objectweb.asm.ClassWriter;
@@ -47,11 +48,14 @@ public class NameTransformer implements ITransformer {
             // Main classes
             for(ClassEntry classEntry : entry.getClassEntries()) {
                 classEntry.setNameTransformed(Dictionary.getInstance().getGeneratedName(entry.getGeneratedNameCount()));
+                classEntry.generateMethodAndFieldMapping(generatedMappings);
 
                 generatedMappings.put(classEntry.getOriginalFullPath().replace(".class", ""), classEntry.getFullPath().replace(".class", ""));
 
+
                 for(ClassEntry subEntries : classEntry.getSubClasses()) {
                     subEntries.setNameTransformed(Dictionary.getInstance().getGeneratedName(entry.getGeneratedNameCount()));
+                    subEntries.generateMethodAndFieldMapping(generatedMappings);
 
                     generatedMappings.put(subEntries.getOriginalFullPath().replace(".class", ""), subEntries.getFullPath().replace(".class", ""));
                 }
@@ -61,11 +65,11 @@ public class NameTransformer implements ITransformer {
             return false;
         });
 
-        generatedMappings.keySet().forEach(s -> wrapperArrayList.add(new ClassNodeWrapper(cxsar.classPath.get(s), Dictionary.getInstance().findAnyClassEntry(s))));
+        //generatedMappings.keySet().forEach(s -> wrapperArrayList.add(new ClassNodeWrapper(cxsar.classPath.get(s), Dictionary.getInstance().findAnyClassEntry(s))));
 
         Logger.getInstance().log("Generated mappings in %dms", timer.end());
 
-        Remapper remapper = new SimpleRemapper(generatedMappings);
+        Remapper remapper = new CustomNameRemapper(generatedMappings);
         HashMap<String, ClassNode> copyClassPath = (HashMap<String, ClassNode>) cxsar.classPath.clone();
 
         timer.begin();
@@ -90,7 +94,7 @@ public class NameTransformer implements ITransformer {
     }
 
     @Override
-    public void transform(Cxsar cxsar) {
+    public void transform(Cxsar cxsar, ClassNode node) {
 
     }
 }

@@ -5,8 +5,10 @@ import cxsar.transformers.impl.name.util.ClassEntry;
 import cxsar.transformers.impl.name.util.PackageEntry;
 import cxsar.utils.Logger;
 import cxsar.utils.Timer;
+import org.objectweb.asm.tree.ClassNode;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 
 // Generate dictionary for the classpath
@@ -16,7 +18,10 @@ public class Dictionary {
     private static Dictionary instance = new Dictionary();
 
     // List of classNames to use
-    private List<String> classNames = new ArrayList<>();
+    private final List<String> classNames = new ArrayList<>();
+
+    // List of completely random letters
+    private final String[] completelyRandomNames = new String[1000];
 
     // HashMap of used mappings
     private HashMap<String, String> usedMappings = new HashMap<>();
@@ -50,7 +55,7 @@ public class Dictionary {
             path = "/" + path; // "/" is the first package entry
 
             if(!isPackageTreePresent(path))
-                createPath(path);
+                createPath(path, classNode);
 
             getPackageTreeEntry(path);
         });
@@ -58,16 +63,26 @@ public class Dictionary {
         // Fix innerClasses
         Timer timer = new Timer();
 
+        // Fix the innter classes
         fixInnerClasses();
 
         Logger.getInstance().log("Fixed inner classes in %dms", timer.end());
 
-        // list of threads
-        List<Thread> threadList = new ArrayList<>();
+        // Speaks for itself
+        generateClassNameDictionary();
 
+        // Generate dictionary
+        generateAlphabetDictionary();
+
+        generated = true;
+    }
+
+    // Generate dictionary
+    public void generateClassNameDictionary() {
         // random
         Random random = new Random();
-
+        // list of threads
+        List<Thread> threadList = new ArrayList<>();
         for(int i = 0; i < 5; ++i)
             threadList.add(new Thread(() -> {
                 while(true) {
@@ -93,8 +108,57 @@ public class Dictionary {
         } catch (Exception e) {
             Logger.getInstance().handleException(e);
         }
+    }
 
-        generated = true;
+    // Just another dicitonary full of random strings
+    public void generateAlphabetDictionary() {
+        // list of threads
+        List<Thread> threadList = new ArrayList<>();
+
+        // count
+        AtomicInteger nameCount = new AtomicInteger();
+
+        for(int i = 0; i < 5; ++i)
+            threadList.add(new Thread(() -> {
+                while(true) {
+                    synchronized (completelyRandomNames) {
+                        // check if its filled
+                        if(completelyRandomNames[completelyRandomNames.length - 1] != null)
+                            break;
+
+                        StringBuilder builder = new StringBuilder();
+                        if(nameCount.get() < 26)
+                            builder.append(ALPHABET.charAt(nameCount.get()));
+                        else
+                            for(int j = nameCount.get(); j > 0; j -= 25)
+                                builder.append(ALPHABET.charAt(j % 26));
+
+                            completelyRandomNames[nameCount.get()] = builder.toString();
+                            nameCount.getAndIncrement();
+
+                    }
+                }
+            }));
+
+        threadList.forEach(Thread::start);
+
+        try {
+            for (Thread thread : threadList) {
+                thread.join();
+            }
+        } catch (Exception e) {
+            Logger.getInstance().handleException(e);
+        }
+    }
+
+    static int count = 0;
+    public String getNextAlphabetDictionaryEntry() {
+        if(count > completelyRandomNames.length - 1)
+            count = 0;
+
+        String res = completelyRandomNames[count];
+        count++;
+        return res;
     }
 
     // Find any classentry
@@ -169,7 +233,7 @@ public class Dictionary {
     }
 
     // Create a path
-    public void createPath(String path) {
+    public void createPath(String path, ClassNode node) {
         String[] entries = path.split("/");
 
         StringBuilder currentPath = new StringBuilder();
@@ -186,6 +250,7 @@ public class Dictionary {
             if(entries[i].endsWith(".class"))
             {
                 ClassEntry newEntry = new ClassEntry(entries[i]);
+                newEntry.setNode(node);
                 newEntry.setParent(currentEntry);
                 currentEntry.getClassEntries().add(newEntry);
                 break;

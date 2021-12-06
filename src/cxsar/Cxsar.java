@@ -21,7 +21,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
@@ -42,9 +41,13 @@ public class Cxsar {
     // All resources
     public HashMap<String, byte[]> resources;
 
+    // Out path
+    private String outPath;
+
     //  Initiate Cxsar with the target JAR file
-    public Cxsar(File targetFile) {
+    public Cxsar(File targetFile, String outPath) {
         this.targetFile = targetFile;
+        this.outPath = outPath;
 
         // Initiate all the fields we need
         transformerList = new ArrayList<>();
@@ -79,9 +82,6 @@ public class Cxsar {
                     // Visit the source file
                     reader.accept(node, 0);
 
-                    // Log
-                    Logger.getInstance().log("Added entry: %s", zipEntry.getName());
-
                     // Add it
                     classPath.put(zipEntry.getName(), node);
                 } else {
@@ -113,7 +113,7 @@ public class Cxsar {
         Logger.getInstance().log("Succesfully did pre-transformation in %dms", timer.end());
 
         // Write to new file
-        ZipOutputStream zipOutputStream = new ZipOutputStream(new FileOutputStream("out.jar"));
+        ZipOutputStream zipOutputStream = new ZipOutputStream(new FileOutputStream(this.outPath));
 
         // Lists...
         List<Thread> threads = new ArrayList<>();
@@ -139,7 +139,21 @@ public class Cxsar {
                     if(stringClassNodeEntry == null)
                         break;
 
+                    // Get the classnode
                     ClassNode classNode = stringClassNodeEntry.getValue();
+
+                    // Processing
+                    this.getTransformerListOrdered().forEach(transformerHolder -> {
+                        // Transform :D
+                        transformerHolder.getTransformer().transform(this, classNode);
+                    });
+
+                    // Force compute frames
+//                    classNode.methods.forEach(method ->
+//                            Arrays.stream(method.instructions.toArray())
+//                                    .filter(abstractInsnNode ->
+//                                            abstractInsnNode instanceof FrameNode)
+//                                    .forEach(node -> method.instructions.remove(node)));
 
                     // Create the writer
                     ClassWriter writer = new ClassWriter(0);

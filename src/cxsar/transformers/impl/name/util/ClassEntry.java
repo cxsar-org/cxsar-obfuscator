@@ -2,9 +2,12 @@ package cxsar.transformers.impl.name.util;
 
 import cxsar.transformers.impl.name.Dictionary;
 import cxsar.utils.Logger;
-import sun.reflect.generics.visitor.Visitor;
+import org.objectweb.asm.tree.ClassNode;
 
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 
 public class ClassEntry {
 
@@ -14,6 +17,9 @@ public class ClassEntry {
     // Original name of class
     String originalName;
 
+    // Original node
+    ClassNode node;
+
     // Parent class
     ClassEntry parentClass;
 
@@ -22,6 +28,9 @@ public class ClassEntry {
 
     // Potential sub classes
     ArrayList<ClassEntry> subClasses;
+
+    // Mappings
+    HashMap<String, String> methodMappings, fieldMappings;
 
     // All used generated method names
     int generatedMethodNamesCount = 0;
@@ -33,6 +42,7 @@ public class ClassEntry {
         this.name = name;
         this.originalName = name;
         this.subClasses = new ArrayList<>();
+        this.methodMappings = this.fieldMappings = new HashMap<>();
     }
 
     public String getName() {
@@ -71,6 +81,14 @@ public class ClassEntry {
         this.subClasses = subClasses;
     }
 
+    public ClassNode getNode() {
+        return node;
+    }
+
+    public void setNode(ClassNode node) {
+        this.node = node;
+    }
+
     public void setNameTransformed(String newName)
     {
         newName += ".class";
@@ -83,6 +101,20 @@ public class ClassEntry {
         this.setName(newName);
         this.parent.generatedNames.add(newName);
         this.parent.generatedNameCount++;
+    }
+
+    public void generateMethodAndFieldMapping(HashMap<String, String> dictionary) {
+        String originalStringSubbed = this.getOriginalFullPath().replace(".class", "");
+        String newNameSubbed = this.getFullPath().replace(".class", "");
+
+//        if(node.methods != null)
+//            node.methods.stream().filter(m -> !m.name.startsWith("<") && !m.name.equals("main") && !m.attrs).forEach(method -> methodMappings.put(String.format("%s.%s.%s", originalStringSubbed, method.name, method.desc), nextMethodName()));
+
+//        if(node.fields != null)
+//            node.fields.forEach(field -> fieldMappings.put(String.format("%s.%s", originalStringSubbed, field.name), nextFieldName()));
+
+        methodMappings.forEach(dictionary::put);
+        fieldMappings.forEach(dictionary::put);
     }
 
     public String getOriginalFullPath() {
@@ -123,7 +155,7 @@ public class ClassEntry {
     }
 
     public String nextMethodName() {
-        return Dictionary.getInstance().getGeneratedName(this.generatedMethodNamesCount++);
+        return Dictionary.getInstance().getGeneratedName(this.generatedMethodNamesCount += 2);
     }
 
     public void setOriginalName(String originalName) {
